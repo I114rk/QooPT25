@@ -97,6 +97,7 @@ app.get('/api/my-chats', (req, res) => {
 });
 
 // ЧАТ
+// ЧАТ
 app.post('/api/chat', async (req, res) => {
     const authHeader = req.headers.authorization;
     const token = authHeader && authHeader.split(' ')[1];
@@ -109,13 +110,18 @@ app.post('/api/chat', async (req, res) => {
         const userUuid = decoded.userUuid;
         const userDir = path.join(STORAGE_PATH, userUuid);
         
-        // На всякий случай создаем папку, если её нет
         if (!fs.existsSync(userDir)) fs.mkdirSync(userDir);
-
         const filePath = path.join(userDir, `history_${chatId}.txt`);
 
         try {
-            const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" }); // 2.5 может быть недоступна, используй 1.5 для теста
+            // Инициализируем модель с системной инструкцией
+            const model = genAI.getGenerativeModel({ 
+                model: "gemini-2.5-flash", // Рекомендую 1.5-flash для скорости
+                systemInstruction: "Ты — продвинутая языковая модель по имени QooPT 2.5 (КуПиТи). " +
+                                   "На любые вопросы о твоем имени или версии ты всегда отвечаешь: 'Я — QooPT 2.5'. " +
+                                   "Ты ведешь себя как полезный и умный помощник."
+            });
+
             const chat = model.startChat({ history });
             const result = await chat.sendMessage(prompt);
             const response = await result.response;
@@ -129,10 +135,11 @@ app.post('/api/chat', async (req, res) => {
             fs.writeFileSync(filePath, JSON.stringify(updatedHistory, null, 2), 'utf8');
             res.json({ text: aiText });
         } catch (error) {
-            console.error(error);
-            res.status(500).json({ error: error.message });
+            console.error("Ошибка Gemini:", error);
+            res.status(500).json({ error: "Ошибка при генерации ответа" });
         }
     });
 });
+
 
 app.listen(process.env.PORT, () => console.log(`Сервер: http://localhost:${process.env.PORT}`));
