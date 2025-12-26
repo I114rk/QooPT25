@@ -64,10 +64,67 @@ app.post('/api/login', (req, res) => {
 });
 
 // ПОЛУЧЕНИЕ СПИСКА ЧАТОВ (Тот самый недостающий кусок!)
+// ЧАТ (Исправленная версия с сохранением истории)
+app.post('/api/chat', async (req, res) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.split(' ')[1];
+    if (!token) return res.sendStatus(401);
+
+    jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
+        if (err) return res.sendStatus(403);
+
+        const { prompt, chatId } = req.body; // Получаем только промпт и ID чата
+        const userUuid = decoded.userUuid;
+        const userDir = path.join(STORAGE_PATH, userUuid);
+        const filePath = path.join(userDir, `history_${chatId}.txt`);
+
+        if (!fs.existsSync(userDir)) fs.mkdirSync(userDir, { recursive: true });
+
+        // 1. Загружаем существующую историю из файла (если есть)
+        let currentHistory = [];
+        if (fs.existsSync(filePath)) {
+            try {
+                const fileData = fs.readFileSync(filePath, 'utf8');
+                currentHistory = JSON.parse(fileData);
+            } catch (e) {
+                currentHistory = [];
+            }
+        }
+
+        try {
+            // 2. Инициализируем модель с жесткой установкой личности
+            const model = genAI.getGenerativeModel({ 
+                model: "gemini-1.5-flash",
+                systemInstruction: "Ты — QooPT 2.5 (КуПиТи), уникальная нейросеть. Ты всегда представляешься как QooPT 2.5. Ты должен отвечать кратко, но по существу, сохраняя стиль продвинутого ИИ."
+            });
+
+            // 3. Запускаем чат с загруженной историей
+            const chat = model.startChat({ history: currentHistory });
+            const result = await chat.sendMessage(prompt);
+            const response = await result.response;
+            const aiText = response.text();
+
+            // 4. Обновляем историю и сохраняем в файл
+            const updatedHistory = [
+                ...currentHistory,
+                { role: "user", parts: [{ text: prompt }] },
+                { role: "model", parts: [{ text: aiText }] }
+            ];
+
+            fs.writeFileSync(filePath, JSON.stringify(updatedHistory, null, 2), 'utf8');
+            
+            res.json({ text: aiText });
+        } catch (error) {
+            console.error("Ошибка чата:", error);
+            res.status(500).json({ error: "Ошибка QooPT 2.5" });
+        }
+    });
+});
+
+// ПОЛУЧЕНИЕ СПИСКА ЧАТОВ (С заголовком QooPT 2.5)
 app.get('/api/my-chats', (req, res) => {
     const authHeader = req.headers.authorization;
     const token = authHeader && authHeader.split(' ')[1];
-    
     if (!token) return res.sendStatus(401);
 
     jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
@@ -78,17 +135,22 @@ app.get('/api/my-chats', (req, res) => {
 
         try {
             const files = fs.readdirSync(userDir);
-            const allChats = files.filter(f => f.endsWith('.txt')).map(file => {
-                const content = fs.readFileSync(path.join(userDir, file), 'utf8');
-                const history = JSON.parse(content);
-                const chatId = file.replace('history_', '').replace('.txt', '');
-                
-                return { 
-                    id: chatId, 
-                    title: history[0]?.parts[0]?.text.substring(0, 25) || "Старый чат", 
-                    history 
-                };
-            });
+            const allChats = files
+                .filter(f => f.endsWith('.txt'))
+                .map(file => {
+                    const content = fs.readFileSync(path.join(userDir, file), 'utf8');
+                    const history = JSON.parse(content);
+                    const chatId = file.replace('history_', '').replace('.txt', '');
+                    
+                    // Заголовок берется из первого сообщения пользователя
+                    const firstMsg = history.find(m => m.role === 'user')?.parts[0]?.text || "Новый диалог";
+                    
+                    return { 
+                        id: chatId, 
+                        title: firstMsg.substring(0, 30) + "...", 
+                        history 
+                    };
+                });
             res.json(allChats.reverse());
         } catch (e) {
             res.json([]);
@@ -96,7 +158,6 @@ app.get('/api/my-chats', (req, res) => {
     });
 });
 
-// ЧАТ
 // ЧАТ
 app.post('/api/chat', async (req, res) => {
     const authHeader = req.headers.authorization;
@@ -143,3 +204,4 @@ app.post('/api/chat', async (req, res) => {
 
 
 app.listen(process.env.PORT, () => console.log(`Сервер: http://localhost:${process.env.PORT}`));
+
