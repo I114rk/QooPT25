@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QooPT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/markdown-it@13.0.1/dist/markdown-it.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        body { background-color: #131314; color: #e3e3e3; font-family: 'Inter', sans-serif; overflow: hidden; }
+        .gemini-gradient { background: linear-gradient(70deg, #4285f4, #9b72cb, #d96570); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 600; }
+        .sidebar { background-color: #1e1f20; width: 280px; flex-shrink: 0; border-right: 1px solid #333; }
+        .chat-item { transition: all 0.2s; border-left: 3px solid transparent; }
+        .chat-item.active { background-color: #37393b; border-left-color: #4285f4; }
+        .chat-container { flex: 1; overflow-y: auto; scroll-behavior: smooth; display: flex; flex-direction: column; gap: 24px; padding: 24px; }
+        .user-msg { background: #2b2b2b; border-radius: 20px; padding: 12px 20px; align-self: flex-end; max-width: 80%; color: #fff; }
+        .ai-msg { align-self: flex-start; width: 100%; display: flex; gap: 16px; }
+        .ai-icon { width: 34px; height: 34px; background: linear-gradient(45deg, #4285f4, #d96570); border-radius: 50%; flex-shrink: 0; }
+        .prose pre { background: #000 !important; border: 1px solid #333; padding: 16px; border-radius: 12px; overflow-x: auto; margin: 10px 0; }
+        .hidden-screen { display: none !important; }
+        input { background: #1e1f20; border: 1px solid #333; color: white; border-radius: 12px; padding: 12px; outline: none; }
+        input:focus { border-color: #4285f4; }
+    </style>
+</head>
+<body class="h-screen flex">
+
+    <div id="auth-screen" class="m-auto w-full max-w-md p-8 bg-[#1e1f20] rounded-3xl shadow-2xl border border-white/5 hidden-screen">
+        <h2 class="text-3xl font-bold mb-6 text-center">Qoo<span class="gemini-gradient">PT 2.5</span></h2>
+        <div class="flex flex-col gap-4">
+            <input type="text" id="username" placeholder="Логин">
+            <input type="password" id="password" placeholder="Пароль">
+            <button onclick="handleAuth('login')" class="bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-medium transition">Войти</button>
+            <button onclick="handleAuth('register')" class="text-gray-400 hover:text-white text-sm text-center transition">Создать новый аккаунт</button>
+            <p id="auth-error" class="text-red-400 text-xs text-center mt-2"></p>
+        </div>
+    </div>
+
+    <div id="main-screen" class="flex-1 flex overflow-hidden hidden-screen">
+        <aside class="sidebar flex flex-col p-4">
+            <button onclick="createNewChat()" class="w-full py-3 mb-6 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition text-sm font-medium">
+                + Новый чат
+            </button>
+            <div id="chat-list" class="flex-1 overflow-y-auto space-y-1">
+                </div>
+            <div class="p-2 border-t border-gray-800 mt-auto">
+                <div id="user-display" class="text-xs text-gray-400 mb-2 px-2"></div>
+                <button onclick="logout()" class="w-full text-left text-red-400 hover:bg-red-400/10 p-2 rounded-lg text-xs transition">Выйти</button>
+            </div>
+        </aside>
+
+        <main class="flex-1 flex flex-col relative bg-[#131314]">
+            <div id="chat-window" class="chat-container md:px-[15%]">
+                </div>
+
+            <div class="p-6 md:px-[15%] border-t border-white/5 bg-[#131314]">
+                <div class="relative max-w-5xl mx-auto flex gap-3">
+                    <textarea id="user-input" rows="1" class="w-full bg-[#1e1f20] text-white rounded-2xl py-4 px-6 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none" placeholder="Спросите Купити..."></textarea>
+                    <button id="send-btn" class="bg-blue-600 p-4 rounded-2xl hover:bg-blue-500 transition shadow-lg">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+                    </button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const md = window.markdownit({ html: true, linkify: true });
+        let chats = [];
+        let currentId = null;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const token = localStorage.getItem('token');
+            if (token) {
+                showScreen('main-screen');
+                loadAllChats();
+            } else {
+                showScreen('auth-screen');
+            }
+        });
+
+        function showScreen(id) {
+            document.getElementById('auth-screen').classList.add('hidden-screen');
+            document.getElementById('main-screen').classList.add('hidden-screen');
+            document.getElementById(id).classList.remove('hidden-screen');
+        }
+
+        async function handleAuth(type) {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const res = await fetch(`/api/${type}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                if (type === 'login') {
+                    localStorage.setItem('token', data.token);
+                    localStorage.setItem('username', data.username);
+                    location.reload();
+                } else alert('Готово! Войдите.');
+            } else document.getElementById('auth-error').innerText = data.error;
+        }
+
+        function logout() { localStorage.clear(); location.reload(); }
+
+        // Загрузка истории с сервера
+        async function loadAllChats() {
+            document.getElementById('user-display').innerText = `@${localStorage.getItem('username')}`;
+            try {
+                const res = await fetch('/api/my-chats', {
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                });
+                if (res.ok) {
+                    chats = await res.json();
+                    if (chats.length > 0) {
+                        currentId = chats[0].id;
+                        renderMessages();
+                    } else {
+                        createNewChat();
+                    }
+                    renderSidebar();
+                }
+            } catch (e) { console.error("Ошибка загрузки истории", e); }
+        }
+
+        function createNewChat() {
+            const id = Date.now().toString();
+            const newChat = { id, title: "Новый чат", history: [] };
+            chats.unshift(newChat);
+            currentId = id;
+            renderSidebar();
+            renderMessages();
+        }
+
+        function renderSidebar() {
+            const list = document.getElementById('chat-list');
+            list.innerHTML = '';
+            chats.forEach(chat => {
+                const div = document.createElement('div');
+                div.className = `chat-item p-3 rounded-xl cursor-pointer text-sm mb-1 truncate ${chat.id === currentId ? 'active' : 'hover:bg-white/5'}`;
+                div.innerText = chat.title;
+                div.onclick = () => { currentId = chat.id; renderMessages(); renderSidebar(); };
+                list.appendChild(div);
+            });
+        }
+
+        function renderMessages() {
+            const win = document.getElementById('chat-window');
+            win.innerHTML = '';
+            const chat = chats.find(c => c.id === currentId);
+            if (!chat) return;
+
+            chat.history.forEach(m => {
+                const div = document.createElement('div');
+                div.className = m.role === 'user' ? 'user-msg' : 'ai-msg';
+                div.innerHTML = m.role === 'model' 
+                    ? `<div class="ai-icon"></div><div class="prose prose-invert">${md.render(m.parts[0].text)}</div>`
+                    : m.parts[0].text;
+                win.appendChild(div);
+            });
+            win.scrollTo(0, win.scrollHeight);
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('user-input');
+            const text = input.value.trim();
+            if (!text || !currentId) return;
+
+            const chat = chats.find(c => c.id === currentId);
+            if (chat.history.length === 0) chat.title = text.substring(0, 25);
+            
+            chat.history.push({ role: "user", parts: [{ text }] });
+            input.value = '';
+            renderMessages();
+
+            try {
+                const res = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    body: JSON.stringify({ 
+                        prompt: text, 
+                        history: chat.history.slice(0, -1),
+                        chatId: currentId 
+                    })
+                });
+                const data = await res.json();
+                chat.history.push({ role: "model", parts: [{ text: data.text }] });
+                renderMessages();
+                renderSidebar();
+            } catch (e) { alert("Ошибка сервера"); }
+        }
+
+        document.getElementById('send-btn').onclick = sendMessage;
+        document.getElementById('user-input').onkeydown = (e) => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }};
+    </script>
+</body>
+</html>
